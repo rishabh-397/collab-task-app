@@ -1,17 +1,12 @@
+// app/layout.tsx
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import { ClerkProvider } from "@clerk/nextjs";
+
+import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
 
-// Clerk components for auth UI
-import {
-  SignInButton,
-  SignUpButton,
-  SignedIn,
-  SignedOut,
-  UserButton,
-} from "@clerk/nextjs";
+import ThemeSwitcher from "@/components/ThemeSwitcher";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -26,43 +21,23 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider>
-      <html lang="en" suppressHydrationWarning>
-        <body className={inter.className}>
-          {/* Basic Navbar with auth controls */}
-          <header className="flex justify-end items-center p-4 gap-4 bg-background border-b">
-            <SignedOut>
-              <SignInButton mode="modal">
-                <button className="px-4 py-2 text-sm font-medium text-foreground hover:bg-accent rounded-md">
-                  Sign In
-                </button>
-              </SignInButton>
-              <SignUpButton mode="modal">
-                <button className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90">
-                  Sign Up
-                </button>
-              </SignUpButton>
-            </SignedOut>
-
-            <SignedIn>
-              <UserButton
-                afterSignOutUrl="/"
-                appearance={{
-                  elements: {
-                    avatarBox: "w-9 h-9",
-                  },
-                }}
-              />
-            </SignedIn>
+    <html lang="en" suppressHydrationWarning>
+      <body className={inter.className}>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          <header className="flex justify-end items-center p-4 gap-6 bg-background border-b sticky top-0 z-50">
+            <ThemeSwitcher />
           </header>
 
-          {/* Main content area */}
-          <main>{children}</main>
+          <main className="min-h-[calc(100vh-64px)]">{children}</main>
 
-          {/* Toast container */}
-          <Toaster />
-        </body>
-      </html>
-    </ClerkProvider>
+          <Toaster richColors position="bottom-right" />
+        </ThemeProvider>
+      </body>
+    </html>
   );
 }
