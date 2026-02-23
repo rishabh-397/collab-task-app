@@ -5,8 +5,7 @@ import "./globals.css";
 
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
-
-import ThemeSwitcher from "@/components/ThemeSwitcher";
+import Header from "@/components/Header";  // ← New import
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -23,18 +22,10 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
-          <header className="flex justify-end items-center p-4 gap-6 bg-background border-b sticky top-0 z-50">
-            <ThemeSwitcher />
-          </header>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+          <Header />  {/* ← Using the new client component */}
 
           <main className="min-h-[calc(100vh-64px)]">{children}</main>
-
           <Toaster richColors position="bottom-right" />
         </ThemeProvider>
       </body>
