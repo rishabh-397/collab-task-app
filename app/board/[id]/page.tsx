@@ -16,7 +16,6 @@ import {
 import {
   SortableContext,
   verticalListSortingStrategy,
-  arrayMove,
 } from "@dnd-kit/sortable";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { Button } from "@/components/ui/button";
@@ -27,7 +26,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
-import { CalendarIcon, Plus, Trash2, Tag, Clock, Edit, Trash } from "lucide-react";
+import { CalendarIcon, Plus, Trash2, Tag, Clock, Edit } from "lucide-react";
 import { toast } from "sonner";
 import SortableCard from "@/components/SortableCard";
 import { cn } from "@/lib/utils";
@@ -94,52 +93,66 @@ export default function BoardDetail() {
 
   useEffect(() => {
     const loadData = async () => {
-      const { data: boardData, error: boardError } = await supabase
-        .from("boards")
-        .select("*")
-        .eq("id", id)
-        .single();
+      try {
+        const { data: boardData, error: boardError } = await supabase
+          .from("boards")
+          .select("*")
+          .eq("id", id)
+          .single();
 
-      if (boardError || !boardData) {
-        toast.error("Board not found");
-        router.push("/dashboard");
-        return;
+        if (boardError || !boardData) {
+          toast.error("Board not found");
+          router.push("/dashboard");
+          return;
+        }
+
+        setBoard(boardData);
+        setRenameTitle(boardData.title);
+
+        const { data: cardData, error: cardError } = await supabase
+          .from("cards")
+          .select("*, comments(*)")
+          .eq("board_id", id)
+          .order("position", { ascending: true });
+
+        if (cardError) {
+          toast.error("Failed to load cards: " + cardError.message);
+        } else {
+          setCards(cardData || []);
+        }
+
+        setLoading(false);
+      } catch (err) {
+        toast.error("Unexpected error loading board");
+        setLoading(false);
       }
-      setBoard(boardData);
-      setRenameTitle(boardData.title);
-
-      const { data: cardData, error: cardError } = await supabase
-        .from("cards")
-        .select("*, comments(*)")
-        .eq("board_id", id)
-        .order("position", { ascending: true });
-
-      if (cardError) toast.error("Failed to load cards: " + cardError.message);
-      else setCards(cardData || []);
-
-      setLoading(false);
     };
 
     loadData();
 
-    const channel = supabase
-      .channel(`cards:board=${id}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "cards", filter: `board_id=eq.${id}` },
-        (payload) => {
-          if (payload.eventType === "INSERT") {
-            setCards((prev) => [...prev, payload.new as CardType]);
-          } else if (payload.eventType === "UPDATE") {
-            setCards((prev) =>
-              prev.map((c) => (c.id === payload.new.id ? payload.new : c))
-            );
-          } else if (payload.eventType === "DELETE") {
-            setCards((prev) => prev.filter((c) => c.id !== payload.old.id));
-          }
-        }
-      )
-      .subscribe();
+  // Real-time subscription
+const channel = supabase
+  .channel(`cards:board=${id}`)
+  .on(
+    "postgres_changes",
+    { event: "*", schema: "public", table: "cards", filter: `board_id=eq.${id}` },
+    (payload) => {
+      if (payload.eventType === "INSERT") {
+        setCards((prev) => [...prev, payload.new as CardType]);
+      } else if (payload.eventType === "UPDATE") {
+        setCards((prev) =>
+          prev.map((c) =>
+            c.id === payload.new.id ? { ...c, ...(payload.new as CardType) } : c
+          )
+        );
+      } else if (payload.eventType === "DELETE") {
+        setCards((prev) => prev.filter((c) => c.id !== payload.old.id));
+      }
+    }
+  )
+  .subscribe();
+
+
 
     return () => {
       supabase.removeChannel(channel);
@@ -326,7 +339,7 @@ export default function BoardDetail() {
             </Dialog>
 
             <Button variant="destructive" onClick={handleDeleteBoard}>
-              <Trash className="h-4 w-4 mr-2" />
+              <Trash2 className="h-4 w-4 mr-2" />
               Delete Board
             </Button>
           </div>
@@ -386,8 +399,10 @@ export default function BoardDetail() {
                                     <div className="mt-3 pt-2 border-t text-sm text-muted-foreground">
                                       {card.comments.map((comment) => (
                                         <p key={comment.id} className="mb-1">
-                                          <span className="font-medium">{comment.user_id.slice(0, 8)}...</span>:{" "}
-                                          {comment.content}
+                                          <span className="font-medium">
+                                            {comment.user_id.slice(0, 8)}...
+                                          </span>
+                                          : {comment.content}
                                         </p>
                                       ))}
                                     </div>
