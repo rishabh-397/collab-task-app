@@ -295,6 +295,12 @@ export default function BoardDetail() {
     }
   };
 
+  const handleUpdateCard = async (cardId: string, updates: Partial<CardType>) => {
+    const { error } = await supabase.from("cards").update(updates).eq("id", cardId);
+    if (error) toast.error(error.message);
+    else toast.success("Card updated");
+  };
+
   const handleUploadAttachment = async (cardId: string, file: File) => {
     if (!file) return;
 
@@ -330,8 +336,11 @@ export default function BoardDetail() {
     }
   };
 
-  const handleAddChecklist = async (cardId: string) => {
-    if (!newChecklistTitle.trim()) return toast.error("Enter checklist title");
+  const handleAddChecklist = async (cardId: string, title: string) => {
+    if (!title.trim()) {
+      toast.error("Enter checklist title");
+      return;
+    }
 
     const maxPos = cards.find(c => c.id === cardId)?.checklists?.length || 0;
 
@@ -339,17 +348,18 @@ export default function BoardDetail() {
       .from("card_checklists")
       .insert({
         card_id: cardId,
-        title: newChecklistTitle,
+        title,
         position: maxPos,
       })
       .select()
       .single();
 
-    if (error) toast.error(error.message);
-    else {
+    if (error) {
+      toast.error("Failed to add checklist: " + error.message);
+    } else {
       toast.success("Checklist item added");
-      await logActivity(cardId, "added_checklist", { title: newChecklistTitle });
-      setNewChecklistTitle("");
+      await logActivity(cardId, "added_checklist", { title });
+      setNewChecklistTitle(""); // clear the input
     }
   };
 
