@@ -1,4 +1,3 @@
-// app/dashboard/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -138,13 +137,12 @@ export default function Dashboard() {
                 </CardHeader>
                 <CardContent>
                   <p className="text-sm text-muted-foreground">
-                    Created{" "}
-                    {board.created_at
+                    Created {board.created_at 
                       ? new Date(board.created_at).toLocaleDateString("en-IN", {
                           day: "numeric",
                           month: "short",
                           year: "numeric",
-                        })
+                        }) 
                       : "Just now"}
                   </p>
                 </CardContent>

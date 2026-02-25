@@ -1,9 +1,7 @@
-// components/SortableCard.tsx   ← or SortableItem.tsx – keep whichever name you have
 "use client";
 
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Card } from "@/components/ui/card";
 
 interface SortableCardProps {
   id: string;
@@ -28,14 +26,14 @@ export default function SortableCard({ id, children }: SortableCardProps) {
   };
 
   return (
-    <Card
+    <div
       ref={setNodeRef}
       style={style}
       {...attributes}
       {...listeners}
-      className="cursor-grab active:cursor-grabbing shadow-sm hover:shadow-md transition-shadow"
+      className="cursor-grab active:cursor-grabbing"
     >
       {children}
-    </Card>
+    </div>
   );
 }

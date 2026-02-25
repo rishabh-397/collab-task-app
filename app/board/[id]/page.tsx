@@ -1,7 +1,6 @@
-// app/board/[id]/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import {
@@ -26,19 +25,44 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
-import { CalendarIcon, Plus, Trash2, Tag, Clock, Edit } from "lucide-react";
+import { CalendarIcon, Plus, Trash2, Tag, Clock, Edit, Paperclip, ListChecks, History, UserPlus, Search } from "lucide-react";
 import { toast } from "sonner";
 import SortableCard from "@/components/SortableCard";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 
 type LabelColor = "green" | "red" | "blue" | "yellow" | "purple";
 
-type CommentType = {
+type AttachmentType = {
   id: string;
-  content: string;
+  file_name: string;
+  file_path: string;
+  file_type: string;
+  created_at: string;
+};
+
+type ChecklistType = {
+  id: string;
+  title: string;
+  is_completed: boolean;
+  position: number;
+  created_at: string;
+};
+
+type ActivityType = {
+  id: string;
+  action: string;
+  details: any;
   user_id: string;
   created_at: string;
+};
+
+type BoardLabelType = {
+  id: string;
+  name: string;
+  color: string;
 };
 
 type CardType = {
@@ -46,9 +70,11 @@ type CardType = {
   title: string;
   list_id: string;
   position: number;
-  labels?: LabelColor[];
+  labels?: string[]; // board_labels.id
   due_date?: string | null;
-  comments?: CommentType[];
+  attachments?: AttachmentType[];
+  checklists?: ChecklistType[];
+  activities?: ActivityType[];
   created_at: string;
 };
 
@@ -58,7 +84,7 @@ const defaultLists = [
   { id: "done", title: "Done" },
 ];
 
-const labelColors: Record<LabelColor, string> = {
+const labelColors: Record<string, string> = {
   green: "bg-green-500/20 text-green-700 border-green-500/30",
   red: "bg-red-500/20 text-red-700 border-red-500/30",
   blue: "bg-blue-500/20 text-blue-700 border-blue-500/30",
@@ -66,25 +92,24 @@ const labelColors: Record<LabelColor, string> = {
   purple: "bg-purple-500/20 text-purple-700 border-purple-500/30",
 };
 
-const unsplashCovers = [
-  "https://images.unsplash.com/photo-1557683316-973673baf926?w=800",
-  "https://images.unsplash.com/photo-1557683304-673a23048d34?w=800",
-  "https://images.unsplash.com/photo-1557683311-973673baf8f4?w=800",
-  "https://images.unsplash.com/photo-1557682250-33bd7092b7c0?w=800",
-  "https://images.unsplash.com/photo-1557683316-973673baf926?w=800",
-];
-
 export default function BoardDetail() {
   const { id } = useParams();
   const router = useRouter();
   const [board, setBoard] = useState<any>(null);
   const [cards, setCards] = useState<CardType[]>([]);
+  const [boardLabels, setBoardLabels] = useState<BoardLabelType[]>([]);
   const [loading, setLoading] = useState(true);
   const [newCardTitle, setNewCardTitle] = useState("");
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
   const [newDueDate, setNewDueDate] = useState<Date | undefined>(undefined);
-  const [newLabel, setNewLabel] = useState<LabelColor | null>(null);
-  const [renameTitle, setRenameTitle] = useState("");
+  const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [editingTitle, setEditingTitle] = useState("");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [newLabelName, setNewLabelName] = useState("");
+  const [newLabelColor, setNewLabelColor] = useState("green");
+  const [newChecklistTitle, setNewChecklistTitle] = useState("");
+  const fileInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -105,59 +130,74 @@ export default function BoardDetail() {
           router.push("/dashboard");
           return;
         }
-
         setBoard(boardData);
-        setRenameTitle(boardData.title);
+        setEditingTitle(boardData.title);
+
+        const { data: labelsData } = await supabase
+          .from("board_labels")
+          .select("*")
+          .eq("board_id", id)
+          .order("name");
+        setBoardLabels(labelsData || []);
 
         const { data: cardData, error: cardError } = await supabase
           .from("cards")
-          .select("*, comments(*)")
+          .select(`
+            *,
+            attachments(*),
+            checklists(*),
+            activities(*)
+          `)
           .eq("board_id", id)
           .order("position", { ascending: true });
 
-        if (cardError) {
-          toast.error("Failed to load cards: " + cardError.message);
-        } else {
-          setCards(cardData || []);
-        }
+        if (cardError) toast.error("Failed to load cards: " + cardError.message);
+        else setCards(cardData || []);
 
         setLoading(false);
       } catch (err) {
-        toast.error("Unexpected error loading board");
+        toast.error("Unexpected error");
         setLoading(false);
       }
     };
 
     loadData();
 
-  // Real-time subscription
-const channel = supabase
-  .channel(`cards:board=${id}`)
-  .on(
-    "postgres_changes",
-    { event: "*", schema: "public", table: "cards", filter: `board_id=eq.${id}` },
-    (payload) => {
-      if (payload.eventType === "INSERT") {
-        setCards((prev) => [...prev, payload.new as CardType]);
-      } else if (payload.eventType === "UPDATE") {
-        setCards((prev) =>
-          prev.map((c) =>
-            c.id === payload.new.id ? { ...c, ...(payload.new as CardType) } : c
-          )
-        );
-      } else if (payload.eventType === "DELETE") {
-        setCards((prev) => prev.filter((c) => c.id !== payload.old.id));
-      }
-    }
-  )
-  .subscribe();
-
-
+    const channel = supabase
+      .channel(`cards:board=${id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "cards", filter: `board_id=eq.${id}` },
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            setCards((prev) => [...prev, payload.new as CardType]);
+          } else if (payload.eventType === "UPDATE") {
+            setCards((prev) =>
+              prev.map((c) =>
+                c.id === payload.new.id ? { ...c, ...(payload.new as CardType) } : c
+              )
+            );
+          } else if (payload.eventType === "DELETE") {
+            setCards((prev) => prev.filter((c) => c.id !== payload.old.id));
+          }
+        }
+      )
+      .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
   }, [id, router]);
+
+  const filteredCards = cards.filter((card) => {
+    if (!searchQuery) return true;
+    const lower = searchQuery.toLowerCase();
+    return (
+      card.title.toLowerCase().includes(lower) ||
+      boardLabels.some(l => card.labels?.includes(l.id) && l.name.toLowerCase().includes(lower)) ||
+      card.due_date?.toLowerCase().includes(lower)
+    );
+  });
 
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
@@ -181,7 +221,6 @@ const channel = supabase
       }
     }
 
-    // Optimistic update
     setCards((prev) => {
       const updated = prev.map((c) =>
         c.id === active.id ? { ...c, list_id: newListId, position: newPosition } : c
@@ -196,14 +235,21 @@ const channel = supabase
       );
     });
 
-    // Save to DB
     const { error } = await supabase
       .from("cards")
       .update({ list_id: newListId, position: newPosition })
       .eq("id", active.id);
 
-    if (error) toast.error("Failed to move card");
-    else toast.success("Card moved!");
+    if (error) {
+      toast.error("Failed to move card");
+    } else {
+      toast.success("Card moved");
+      await logActivity(active.id as string, "moved_card", {
+        from_list: activeListId,
+        to_list: newListId,
+        position: newPosition,
+      });
+    }
   };
 
   const handleAddCard = async () => {
@@ -222,7 +268,7 @@ const channel = supabase
       title: newCardTitle,
       position: maxPos + 1,
       due_date: newDueDate ? newDueDate.toISOString() : null,
-      labels: newLabel ? [newLabel] : [],
+      labels: selectedLabels,
     };
 
     const { data, error } = await supabase.from("cards").insert(newCard).select();
@@ -232,41 +278,158 @@ const channel = supabase
       setNewCardTitle("");
       setSelectedListId(null);
       setNewDueDate(undefined);
-      setNewLabel(null);
+      setSelectedLabels([]);
       toast.success("Card added!");
+      if (data?.[0]) {
+        await logActivity(data[0].id, "created_card", { title: newCardTitle });
+      }
     }
   };
 
   const handleDeleteCard = async (cardId: string) => {
     const { error } = await supabase.from("cards").delete().eq("id", cardId);
     if (error) toast.error(error.message);
-    else toast.success("Card deleted");
+    else {
+      toast.success("Card deleted");
+      await logActivity(cardId, "deleted_card");
+    }
   };
 
-  const handleUpdateCard = async (cardId: string, updates: Partial<CardType>) => {
-    const { error } = await supabase.from("cards").update(updates).eq("id", cardId);
+  const handleUploadAttachment = async (cardId: string, file: File) => {
+    if (!file) return;
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}.${fileExt}`;
+    const filePath = `card-${cardId}/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('card-attachments')
+      .upload(filePath, file);
+
+    if (uploadError) {
+      toast.error("Upload failed: " + uploadError.message);
+      return;
+    }
+
+    const { data: attachment } = await supabase
+      .from("card_attachments")
+      .insert({
+        card_id: cardId,
+        user_id: (await supabase.auth.getUser()).data.user?.id,
+        file_name: file.name,
+        file_path: filePath,
+        file_type: file.type,
+        file_size: file.size,
+      })
+      .select()
+      .single();
+
+    if (attachment) {
+      toast.success("File attached!");
+      await logActivity(cardId, "attached_file", { file_name: file.name });
+    }
+  };
+
+  const handleAddChecklist = async (cardId: string) => {
+    if (!newChecklistTitle.trim()) return toast.error("Enter checklist title");
+
+    const maxPos = cards.find(c => c.id === cardId)?.checklists?.length || 0;
+
+    const { data, error } = await supabase
+      .from("card_checklists")
+      .insert({
+        card_id: cardId,
+        title: newChecklistTitle,
+        position: maxPos,
+      })
+      .select()
+      .single();
+
     if (error) toast.error(error.message);
+    else {
+      toast.success("Checklist item added");
+      await logActivity(cardId, "added_checklist", { title: newChecklistTitle });
+      setNewChecklistTitle("");
+    }
   };
 
-  const handleAddComment = async (cardId: string, content: string) => {
-    if (!content.trim()) return;
+  const handleToggleChecklist = async (checklistId: string, isCompleted: boolean) => {
+    const { error } = await supabase
+      .from("card_checklists")
+      .update({ is_completed: !isCompleted })
+      .eq("id", checklistId);
 
-    const { error } = await supabase.from("comments").insert({
-      card_id: cardId,
-      user_id: (await supabase.auth.getUser()).data.user?.id,
-      content,
+    if (error) toast.error(error.message);
+    else toast.success("Checklist updated");
+  };
+
+  const handleInviteMember = async () => {
+    if (!inviteEmail.trim()) return toast.error("Enter email");
+
+    const { data: userData, error: userError } = await supabase
+      .from("users")
+      .select("id")
+      .eq("email", inviteEmail.trim())
+      .single();
+
+    if (userError || !userData) {
+      toast.error("User not found. They must sign up first.");
+      return;
+    }
+
+    const { error } = await supabase.from("board_members").insert({
+      board_id: id,
+      user_id: userData.id,
+      role: "member",
     });
 
     if (error) toast.error(error.message);
-    else toast.success("Comment added");
+    else {
+      toast.success(`Added ${inviteEmail} as member`);
+      setInviteEmail("");
+      await logActivity(id as string, "invited_member", { email: inviteEmail });
+    }
+  };
+
+  const handleCreateLabel = async () => {
+    if (!newLabelName.trim()) return toast.error("Enter label name");
+
+    const { data, error } = await supabase
+      .from("board_labels")
+      .insert({
+        board_id: id,
+        name: newLabelName,
+        color: newLabelColor,
+      })
+      .select()
+      .single();
+
+    if (error) toast.error(error.message);
+    else {
+      toast.success("Label created");
+      setBoardLabels([...boardLabels, data]);
+      setNewLabelName("");
+      await logActivity(id as string, "created_label", { name: newLabelName });
+    }
   };
 
   const handleRenameBoard = async () => {
-    if (!board.title.trim()) return toast.error("Title cannot be empty");
+    if (!editingTitle.trim()) {
+      toast.error("Board title cannot be empty");
+      return;
+    }
 
-    const { error } = await supabase.from("boards").update({ title: board.title }).eq("id", id);
-    if (error) toast.error(error.message);
-    else toast.success("Board renamed");
+    const { error } = await supabase
+      .from("boards")
+      .update({ title: editingTitle })
+      .eq("id", id);
+
+    if (error) {
+      toast.error("Failed to rename board: " + error.message);
+    } else {
+      toast.success("Board renamed successfully");
+      setBoard({ ...board, title: editingTitle });
+    }
   };
 
   const handleDeleteBoard = async () => {
@@ -278,6 +441,16 @@ const channel = supabase
       toast.success("Board deleted");
       router.push("/dashboard");
     }
+  };
+
+  const logActivity = async (cardId: string | number, action: string, details: any = {}) => {
+    const user = await supabase.auth.getUser();
+    await supabase.from("card_activities").insert({
+      card_id: cardId,
+      user_id: user.data.user?.id,
+      action,
+      details,
+    });
   };
 
   if (loading) {
@@ -331,8 +504,8 @@ const channel = supabase
                   <DialogTitle>Rename Board</DialogTitle>
                 </DialogHeader>
                 <Input
-                  value={board.title}
-                  onChange={(e) => setBoard({ ...board, title: e.target.value })}
+                  value={editingTitle}
+                  onChange={(e) => setEditingTitle(e.target.value)}
                 />
                 <Button onClick={handleRenameBoard}>Save</Button>
               </DialogContent>
@@ -342,6 +515,18 @@ const channel = supabase
               <Trash2 className="h-4 w-4 mr-2" />
               Delete Board
             </Button>
+          </div>
+
+          <div className="mb-6">
+            <div className="relative max-w-md">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search cards..."
+                className="pl-9"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
           </div>
 
           <DndContext
@@ -373,17 +558,14 @@ const channel = supabase
 
                                   {card.labels && card.labels.length > 0 && (
                                     <div className="flex flex-wrap gap-1 mb-2">
-                                      {card.labels.map((label: LabelColor) => (
-                                        <span
-                                          key={label}
-                                          className={cn(
-                                            "px-2 py-0.5 text-xs rounded-full border",
-                                            labelColors[label]
-                                          )}
-                                        >
-                                          {label}
-                                        </span>
-                                      ))}
+                                      {card.labels.map((labelId) => {
+                                        const lbl = boardLabels.find(l => l.id === labelId);
+                                        return lbl ? (
+                                          <Badge key={labelId} variant="outline" className={cn("text-xs", labelColors[lbl.color] || "")}>
+                                            {lbl.name}
+                                          </Badge>
+                                        ) : null;
+                                      })}
                                     </div>
                                   )}
 
@@ -394,29 +576,88 @@ const channel = supabase
                                     </div>
                                   )}
 
-                                  {/* Comments */}
-                                  {card.comments && card.comments.length > 0 && (
-                                    <div className="mt-3 pt-2 border-t text-sm text-muted-foreground">
-                                      {card.comments.map((comment) => (
-                                        <p key={comment.id} className="mb-1">
-                                          <span className="font-medium">
-                                            {comment.user_id.slice(0, 8)}...
-                                          </span>
-                                          : {comment.content}
-                                        </p>
-                                      ))}
+                                  {card.attachments && card.attachments.length > 0 && (
+                                    <div className="mt-3 pt-2 border-t text-sm">
+                                      <p className="font-medium">Attachments:</p>
+                                      <div className="flex flex-wrap gap-2 mt-1">
+                                        {card.attachments.map((att) => (
+                                          <a
+                                            key={att.id}
+                                            href={supabase.storage.from('card-attachments').getPublicUrl(att.file_path).data.publicUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-primary hover:underline text-xs truncate max-w-[120px]"
+                                          >
+                                            {att.file_name}
+                                          </a>
+                                        ))}
+                                      </div>
                                     </div>
                                   )}
 
-                                  {/* Add comment */}
-                                  <div className="mt-3">
+                                  {card.checklists && card.checklists.length > 0 && (
+                                    <div className="mt-3 pt-2 border-t text-sm">
+                                      <p className="font-medium">Checklist:</p>
+                                      <div className="mt-1 space-y-1">
+                                        {card.checklists.map((item) => (
+                                          <div key={item.id} className="flex items-center gap-2">
+                                            <Switch
+                                              checked={item.is_completed}
+                                              onCheckedChange={() => handleToggleChecklist(item.id, item.is_completed)}
+                                            />
+                                            <span className={item.is_completed ? "line-through text-muted-foreground" : ""}>
+                                              {item.title}
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {card.activities && card.activities.length > 0 && (
+                                    <div className="mt-3 pt-2 border-t text-xs text-muted-foreground">
+                                      <p className="font-medium">Activity:</p>
+                                      <div className="max-h-32 overflow-y-auto">
+                                        {card.activities.slice(0, 5).map((act) => (
+                                          <p key={act.id}>
+                                            {format(new Date(act.created_at), "MMM d, h:mm a")}: {act.action}
+                                            {act.details ? ` (${JSON.stringify(act.details)})` : ''}
+                                          </p>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  <div className="mt-2">
+                                    <input
+                                      type="file"
+                                      id={`file-${card.id}`}
+                                      className="hidden"
+                                      onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) handleUploadAttachment(card.id, file);
+                                      }}
+                                    />
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => document.getElementById(`file-${card.id}`)?.click()}
+                                    >
+                                      <Paperclip className="h-4 w-4 mr-2" />
+                                      Attach
+                                    </Button>
+                                  </div>
+
+                                  <div className="mt-2">
                                     <Input
-                                      placeholder="Add a comment..."
+                                      placeholder="Add checklist item..."
                                       className="text-sm"
-                                      onKeyDown={async (e) => {
-                                        if (e.key === "Enter" && e.currentTarget.value.trim()) {
-                                          await handleAddComment(card.id, e.currentTarget.value.trim());
-                                          e.currentTarget.value = "";
+                                      value={newChecklistTitle}
+                                      onChange={(e) => setNewChecklistTitle(e.target.value)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter" && newChecklistTitle.trim()) {
+                                          handleAddChecklist(card.id, newChecklistTitle);
+                                          setNewChecklistTitle("");
                                         }
                                       }}
                                     />
@@ -505,21 +746,27 @@ const channel = supabase
                           </div>
 
                           <div className="space-y-2">
-                            <Label>Labels (optional)</Label>
+                            <Label>Status Labels (optional)</Label>
                             <div className="flex flex-wrap gap-2">
-                              {(["green", "red", "blue", "yellow", "purple"] as LabelColor[]).map((color) => (
+                              {boardLabels.map((lbl) => (
                                 <Button
-                                  key={color}
+                                  key={lbl.id}
                                   variant="outline"
                                   size="sm"
                                   className={cn(
                                     "border-2",
-                                    newLabel === color ? `border-${color}-500` : "border-transparent",
-                                    `bg-${color}-500/10 hover:bg-${color}-500/20`
+                                    selectedLabels.includes(lbl.id) ? `border-${lbl.color}-500` : "border-transparent",
+                                    `bg-${lbl.color}-500/10 hover:bg-${lbl.color}-500/20`
                                   )}
-                                  onClick={() => setNewLabel(newLabel === color ? null : color)}
+                                  onClick={() => {
+                                    setSelectedLabels(prev =>
+                                      prev.includes(lbl.id)
+                                        ? prev.filter(id => id !== lbl.id)
+                                        : [...prev, lbl.id]
+                                    );
+                                  }}
                                 >
-                                  {color}
+                                  {lbl.name}
                                 </Button>
                               ))}
                             </div>
@@ -536,6 +783,69 @@ const channel = supabase
               ))}
             </div>
           </DndContext>
+
+          <div className="mt-8">
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="outline">
+                  <UserPlus className="h-4 w-4 mr-2" />
+                  Invite Member
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Invite to Board</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <Input
+                    placeholder="Email address"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                  />
+                  <Button onClick={handleInviteMember} disabled={!inviteEmail.trim()}>
+                    Send Invite
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
+
+          <div className="mt-4">
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Tag className="h-4 w-4 mr-2" />
+                  New Label
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Create Label</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <Input
+                    placeholder="Label name"
+                    value={newLabelName}
+                    onChange={(e) => setNewLabelName(e.target.value)}
+                  />
+                  <select
+                    className="w-full p-2 border rounded"
+                    value={newLabelColor}
+                    onChange={(e) => setNewLabelColor(e.target.value)}
+                  >
+                    <option value="green">Green</option>
+                    <option value="red">Red</option>
+                    <option value="blue">Blue</option>
+                    <option value="yellow">Yellow</option>
+                    <option value="purple">Purple</option>
+                  </select>
+                  <Button onClick={handleCreateLabel} disabled={!newLabelName.trim()}>
+                    Create Label
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
       </div>
     </div>
