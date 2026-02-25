@@ -297,8 +297,11 @@ export default function BoardDetail() {
 
   const handleUpdateCard = async (cardId: string, updates: Partial<CardType>) => {
     const { error } = await supabase.from("cards").update(updates).eq("id", cardId);
-    if (error) toast.error(error.message);
-    else toast.success("Card updated");
+    if (error) toast.error("Failed to update card: " + error.message);
+    else {
+      toast.success("Card updated");
+      // Optional: refresh cards if needed
+    }
   };
 
   const handleUploadAttachment = async (cardId: string, file: File) => {
